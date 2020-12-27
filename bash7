@@ -1,0 +1,1090 @@
+#!/bin/sh -e
+
+#This script will compile and install a static ffmpeg build with support for nvenc un ubuntu.
+#See the prefix path and compile options if edits are needed to suit your needs.
+
+# Based on:  https://trac.ffmpeg.org/wiki/CompilationGuide/Ubuntu
+# Based on:  https://gist.github.com/Brainiarc7/3f7695ac2a0905b05c5b
+# Rewritten here: https://github.com/ilyaevseev/ffmpeg-build-static/
+
+
+# Globals
+NASM_VERSION="2.15.05"
+YASM_VERSION="1.3.0"
+LAME_VERSION="3.100"
+OPUS_VERSION="1.3.1"
+LASS_VERSION="0.14.0"
+AMR_VERSION="0.1.5"
+OGG_VERSION="1.3.3"
+SRT_VERSION="1.4.2"
+PKG_VERSION="0.29.2"
+LV2_VERSION="1.18.0"
+LILV_VERSION="0.24.10"
+SERD_VERSION="0.30.6"
+SORD_VERSION="0.16.6"
+SRATOM_VERSION="0.6.6"
+PCRE_VERSION="8.44"
+ZLIB_VERSION="1.2.11"
+OPENSSL_VERSION="1.1.1"
+OPENCORE_VERSION="0.1.5"
+XVID_VERSION="1.3.7"
+X264_VERSION="20191217-2245"
+FDKAAC_VERSION="2.0.1"
+CMAKE_VERSION="3.19.2"
+CMAKE_SUBVERSION="3.19"
+CUDA_VERSION="10.0.130-1"
+CUDA_REPO_KEY="http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1604/x86_64/7fa2af80.pub"
+CUDA_DIR="/usr/local/cuda"
+WORK_DIR="$HOME/Sources"
+DEST_DIR="$HOME/Binaries"
+BIN_DIR="$HOME/FFmpeg"
+CFLAGS="-I$DEST_DIR/include"
+LDEXEFLAGS="-static"
+LDFLAGS="-L$DEST_DIR/lib"
+EXTRALIBS="-ldl -lpthread -lm -lz"
+
+mkdir -p "$WORK_DIR" "$DEST_DIR" "$DEST_DIR/bin" "$BIN_DIR"
+
+export PATH="$DEST_DIR/bin:$PATH"
+export PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:$PKG_CONFIG_PATH"
+#PKG_CONFIG="/usr/bin/pkgconf"
+#PKG_CONFIG_PATH="/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib64/pkgconfig"
+
+MYDIR="$(cd "$(dirname "$0")" && pwd)"  #"
+
+####  Routines  ################################################
+
+Wget() { wget -cN "$@"; }
+
+Make() { make -j$(nproc); make "$@"; }
+
+Clone() {
+    local DIR="$(basename "$1" .git)"
+
+    cd "$WORK_DIR/"
+    test -d "$DIR/.git" || git clone --depth=1 "$@"
+
+    cd "$DIR"
+    git pull
+}
+
+# sudo apt install software-properties-common
+# sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+
+PKGS="autoconf automake libtool patch make bzip2 unzip wget git mercurial"
+#PKGS10="cmake cmake3 cmake-curses-gui zlib1g-dev liblilv-dev nasm yasm libxvidcore-dev libvorbis-dev libass-dev libx264-dev libx265-dev libaom-dev libogg-dev aom-tools libopencore-amrnb-dev libopencore-amrwb-dev libvpx-dev pkg-config libgcc1 libopus-dev lib32gcc1 libx32gcc1 libmp3lame-dev build-essential autoconf automake libtool libgccs-dev gcc-multilib g++-multilib gcc-7 g++-7 gcc-8 g++-8 gcc-9 g++-9 g++"
+PKGS9="libfreetype6-dev libdrm-dev libsdl2-dev p11-kit libva-dev libvdpau-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev texinfo"
+PKGS8="wget libchromaprint-dev frei0r-plugins-dev gnutls-dev ladspa-sdk libcaca-dev libcdio-paranoia-dev libcodec2-dev libfontconfig1-dev libfreetype6-dev"
+PKGS7="libfribidi-dev libgme-dev libgsm1-dev libjack-dev libmodplug-dev libopenjp2-7-dev libopenmpt-dev"
+PKGS6="libpulse-dev librsvg2-dev librubberband-dev librtmp-dev libshine-dev libsmbclient-dev libsnappy-dev libsoxr-dev libspeex-dev libssh-dev"
+PKGS5="libtesseract-dev libtheora-dev libtwolame-dev libv4l-dev libvo-amrwbenc-dev libwavpack-dev libwebp-dev"
+PKGS4="libxml2-dev libzmq3-dev libzvbi-dev libopenal-dev opencl-dev libjack-dev git libx11-dev libperl-dev"
+PKGS3="libpciaccess-dev libpciaccess0 xorg-dev intel-gpu-tools opencl-headers libwayland-dev xutils-dev ocl-icd-* libssl-dev libbz2-1.0 libbz2-dev libbz2-ocaml"
+PKGS2="apt-clone libbz2-ocaml-dev python-dev python-bzutils libbz2-dev libbz2-1.0 libbz2-dev libbz2-ocaml libbz2-ocaml-dev"
+PKGS1="unzip build-essential autoconf automake libtool git checkinstall autoconf automake libtool shtool patch make bzip2 unzip wget git mercurial tclsh git-all xz-utils libnuma-dev"
+
+installAptLibs() {
+	echo "####  APT - LIBS  ################################################"
+    sudo apt-get update
+	for i in $PKGS; do
+	  sudo apt-get -y install $i
+	done
+	for i in $PKGS1 $PKGS2 $PKGS3 $PKGS4 $PKGS5 $PKGS6 $PKGS7 $PKGS8 $PKGS9; do
+	  sudo apt-get -y --force-yes install $i
+	done
+    sudo apt-get -y --force-yes install \
+      build-essential texi2html software-properties-common \
+      libfreetype6-dev libgpac-dev libsdl1.2-dev libtheora-dev libva-dev \
+      libvdpau-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev
+	  # pkg-config libvorbis-dev zlib1g-dev
+}
+
+installYumLibs() {
+    sudo yum -y install $PKGS freetype-devel gcc gcc-c++ pkgconfig zlib-devel \
+      libtheora-devel libvorbis-devel libva-devel
+}
+
+installLibs() {
+    echo "Installing prerequisites"
+    . /etc/os-release
+    case "$ID" in
+        ubuntu | linuxmint ) installAptLibs ;;
+        * )                  installYumLibs ;;
+    esac
+}
+
+installCUDASDKdeb() {
+    echo "####  CUDA - SDK  ################################################"
+    UBUNTU_VERSION="$1"
+    local CUDA_REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/x86_64/cuda-repo-ubuntu1804_${CUDA_VERSION}_amd64.deb"
+    Wget "$CUDA_REPO_URL"
+    sudo dpkg -i "$(basename "$CUDA_REPO_URL")"
+    sudo apt-key adv --fetch-keys "$CUDA_REPO_KEY"
+    sudo apt-get -y update
+    sudo apt-get -y install cuda
+
+    sudo env LC_ALL=C.UTF-8 add-apt-repository -y ppa:graphics-drivers/ppa
+    sudo apt-get -y update
+    sudo apt-get -y upgrade
+}
+
+installCUDASDKyum() {
+    rpm -q cuda-repo-rhel7 2>/dev/null ||
+       sudo yum install -y "https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-repo-rhel7-${CUDA_VERSION}.x86_64.rpm"
+    sudo yum install -y cuda
+}
+
+installCUDASDK() {
+    echo "Installing CUDA and the latest driver repositories from repositories"
+    cd "$WORK_DIR/"
+
+    . /etc/os-release
+    case "$ID-$VERSION_ID" in
+        ubuntu-16.04 ) installCUDASDKdeb 1604 ;;
+        ubuntu-18.04 ) installCUDASDKdeb 1804 ;;
+        linuxmint-19.1)installCUDASDKdeb 1804 ;;
+        centos-7     ) installCUDASDKyum ;;
+        * ) echo "ERROR: only CentOS 7, Ubuntu 16.04 or 18.04 are supported now."; exit 1;;
+    esac
+}
+
+installNvidiaSDK() {
+	echo "####  NVENC - SDK  ################################################"
+    echo "Installing the nVidia NVENC SDK."
+    Clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git
+    make
+    make install PREFIX="$DEST_DIR"
+    patch --force -d "$DEST_DIR" -p1 < "$MYDIR/dynlink_cuda.h.patch" ||
+        echo "..SKIP PATCH, POSSIBLY NOT NEEDED. CONTINUED.."
+		
+	CFLAGS+=" -I/usr/local/cuda/include"
+	LDFLAGS+=" -L/usr/local/cuda/lib64"
+}
+
+compileCMake() {
+    echo "####  Cmake  ################################################"
+    echo "Compiling Cmake"
+    cd "$WORK_DIR/"
+    Wget "https://cmake.org/files/v$CMAKE_SUBVERSION/cmake-$CMAKE_VERSION.tar.gz"
+    tar xzvf "cmake-$CMAKE_VERSION.tar.gz"
+    cd "cmake-$CMAKE_VERSION"*
+	./configure --prefix="$DEST_DIR" --system-zlib
+	make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileNasm() {
+	echo "####  NASM  ################################################"
+    echo "Compiling nasm"
+    cd "$WORK_DIR/"
+    Wget "http://www.nasm.us/pub/nasm/releasebuilds/$NASM_VERSION/nasm-$NASM_VERSION.tar.gz"
+    tar xzvf "nasm-$NASM_VERSION.tar.gz"
+    cd "nasm-$NASM_VERSION"
+    ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin"
+    Make install distclean
+}
+
+compileYasm() {
+    echo "####  YASM  ################################################"
+    echo "Compiling yasm"
+    cd "$WORK_DIR/"
+    Wget "http://www.tortall.net/projects/yasm/releases/yasm-$YASM_VERSION.tar.gz"
+    tar xzvf "yasm-$YASM_VERSION.tar.gz"
+    cd "yasm-$YASM_VERSION/"
+    ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin"
+    Make install distclean
+}
+
+compileLV2() {
+    echo "####  lv2-config  ################################################"
+    echo "####  --enable-lv2  config ####"
+    echo "Compiling lv2-config"
+    cd "$WORK_DIR/"
+    Wget "https://lv2plug.in/spec/lv2-$LV2_VERSION.tar.bz2"
+    tar xvf "lv2-$LV2_VERSION.tar.bz2"
+    cd "lv2-$LV2_VERSION"*
+    ./waf configure --prefix="$DEST_DIR" --lv2-user CFLAGS="-I$DEST_DIR/include"
+	./waf
+	./waf install
+	
+    echo "Compiling waflib"
+    cd "$WORK_DIR/"
+    Wget "https://gitlab.com/drobilla/autowaf/-/archive/master/autowaf-master.tar.gz"
+    tar xzvf "autowaf-master.tar.gz"
+	mv "autowaf-master" "waflib"
+	
+    echo "Compiling serd-config"
+    cd "$WORK_DIR/"
+    Wget "https://gitlab.com/drobilla/serd/-/archive/v$SERD_VERSION/serd-v$SERD_VERSION.tar.gz"
+    tar xzvf "serd-v$SERD_VERSION.tar.gz"
+    cd "serd-v$SERD_VERSION"*
+	cp -r "$WORK_DIR/waflib/"* "$WORK_DIR/serd-v$SERD_VERSION/waflib/"
+    ./waf configure --prefix="$DEST_DIR" --static --no-shared --no-posix CFLAGS="-I$DEST_DIR/include"
+    ./waf
+    ./waf install
+	
+    echo "Compiling pcre-config"
+    cd "$WORK_DIR/"
+    Wget "https://ftp.pcre.org/pub/pcre/pcre-$PCRE_VERSION.tar.gz"
+    tar xzvf "pcre-$PCRE_VERSION.tar.gz"
+    cd "pcre-$PCRE_VERSION"*
+	./configure --prefix="$DEST_DIR" --disable-shared --enable-static CFLAGS="-I$DEST_DIR/include"
+	make -j$(nproc) VERBOSE=1
+	Make install distclean
+	
+    echo "Compiling sord-config"
+    cd "$WORK_DIR/"
+    Wget "https://gitlab.com/drobilla/sord/-/archive/v$SORD_VERSION/sord-v$SORD_VERSION.tar.gz"
+    tar xzvf "sord-v$SORD_VERSION.tar.gz"
+    cd "sord-v$SORD_VERSION"*
+	cp -r "$WORK_DIR/waflib/"* "$WORK_DIR/sord-v$SORD_VERSION/waflib/"
+    ./waf configure --prefix="$DEST_DIR" CFLAGS="-I$DEST_DIR/include" --static --no-shared --no-utils
+    ./waf CFLAGS=$"-I$DEST_DIR/include"
+    ./waf install
+	
+    echo "Compiling sratom-config"
+    cd "$WORK_DIR/"
+    Wget "https://gitlab.com/lv2/sratom/-/archive/v$SRATOM_VERSION/sratom-v$SRATOM_VERSION.tar.gz"
+    tar xzvf "sratom-v$SRATOM_VERSION.tar.gz"
+    cd "sratom-v$SRATOM_VERSION"*
+	cp -r "$WORK_DIR/waflib/"* "$WORK_DIR/sratom-v$SRATOM_VERSION/waflib/"
+    ./waf configure --prefix="$DEST_DIR" --static --no-shared CFLAGS="-I$DEST_DIR/include"
+    ./waf
+    ./waf install
+
+    echo "Compiling lilv-config"
+    cd "$WORK_DIR/"
+    Wget "https://gitlab.com/lv2/lilv/-/archive/v$LILV_VERSION/lilv-v$LILV_VERSION.tar.gz"
+    tar xzvf "lilv-v$LILV_VERSION.tar.gz"
+    cd "lilv-v$LILV_VERSION"*
+	cp -r "$WORK_DIR/waflib/"* "$WORK_DIR/lilv-v$LILV_VERSION/waflib/"
+    ./waf configure --prefix="$DEST_DIR" --static --no-shared --no-utils CFLAGS="-I$DEST_DIR/include"
+    ./waf
+    ./waf install
+	CFLAGS+=" -I$DEST_DIR/include/lilv-0"
+}
+
+compilePkgConfig() {
+    echo "####  pkg-config  ################################################"
+    echo "Compiling pkg-config"
+    cd "$WORK_DIR/"
+    Wget "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKG_VERSION.tar.gz"
+    tar xzvf "pkg-config-$PKG_VERSION.tar.gz"
+    cd "pkg-config-$PKG_VERSION"*
+    ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin" --with-pc-path="$DEST_DIR"/lib/pkgconfig --with-system-includedir=/usr/include --with-system-libdir=/lib:/usr/lib --with-internal-glib
+	make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compilePkgConfig2() {
+    echo "####  pkg-config  ################################################"
+    echo "Compiling pkg-config"
+    cd "$WORK_DIR/"
+    Wget "https://pkgconfig.freedesktop.org/releases/pkg-config-$PKG_VERSION.tar.gz"
+    tar xzvf "pkg-config-$PKG_VERSION.tar.gz"
+    cd "pkg-config-$PKG_VERSION/"
+    ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin" --with-pc-path="$DEST_DIR"/lib/pkgconfig --silent --with-internal-glib
+	make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileZlib() {
+    echo "####  ZLib  ################################################"
+    echo "Compiling Zlib"
+    cd "$WORK_DIR/"
+    Wget "https://www.zlib.net/zlib-$ZLIB_VERSION.tar.gz"
+    tar xzvf "zlib-$ZLIB_VERSION.tar.gz"
+    cd "zlib-$ZLIB_VERSION"*
+	./configure --static --prefix="$DEST_DIR"
+	make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileOpenSSL() {
+    echo "####  OPEN SSL  ################################################"
+    echo "Compiling Open ssl"
+    cd "$WORK_DIR/"
+    Wget "https://www.openssl.org/source/openssl-$OPENSSL_VERSIONi.tar.gz"
+    tar xzvf "openssl-$OPENSSL_VERSIONi.tar.gz"
+    cd "openssl-$OPENSSL_VERSIONi"*
+	./config --prefix="$DEST_DIR" --openssldir="$DEST_DIR" --with-zlib-include="$DEST_DIR"/include/ --with-zlib-lib="$DEST_DIR"/lib no-shared zlib
+	make -j$(nproc) VERBOSE=1
+    Make install_sw
+}
+
+compileLibX264() {
+	echo "####  X264  ################################################"
+    echo "Compiling libx264"
+    cd "$WORK_DIR/"
+    Wget http://download.videolan.org/pub/x264/snapshots/x264-snapshot-$X264_VERSION.tar.bz2
+    rm -rf x264-snapshot*/ || :
+    tar xjvf x264-snapshot-$X264_VERSION.tar.bz2
+    cd x264-snapshot-$X264_VERSION*
+    ./configure --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin" --enable-static --enable-pic CXXFLAGS="-fPIC" --bit-depth=all
+    make -j$(nproc) VERBOSE=1
+	Make install
+	Make install-lib-static
+}
+
+compileLibX265() {
+	echo "####  X265  ################################################"
+	rm -rf /root/Sources/x265_git
+	rm /root/Binaries/bin/x265*
+	rm /root/Binaries/include/x265*
+	rm /root/Binaries/lib/libx265*
+	rm /root/Binaries/lib/pkgconfig/x265*
+	cd "$WORK_DIR/"
+    Clone https://bitbucket.org/multicoreware/x265_git.git
+	cd "$WORK_DIR/x265_git"*
+	cd "source"
+	PATH="$DEST_DIR/bin:$PATH" \
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:$PKG_CONFIG_PATH" \
+	cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_SHARED:bool=off -DBUILD_SHARED_LIBS=OFF .
+	# cmake -DCMAKE_INSTALL_PREFIX:PATH="$DEST_DIR" -DENABLE_SHARED:bool=off .
+	# cmake -DCMAKE_INSTALL_PREFIX:PATH="$DEST_DIR" -DENABLE_SHARED:bool=off ../../source
+	make -j$(nproc) VERBOSE=1
+	Make install distclean
+	sed "s/-lx265/-lx265 -lstdc++/g" "$DEST_DIR/lib/pkgconfig/x265.pc" > "$DEST_DIR/lib/pkgconfig/x265.pc.tmp"
+	mv "$DEST_DIR/lib/pkgconfig/x265.pc.tmp" "$DEST_DIR/lib/pkgconfig/x265.pc"
+}
+
+compileLibX265_v4() {
+	echo "####  X265  ################################################"
+	rm -rf /root/Sources/x265_git
+	rm /root/Binaries/bin/x265*
+	rm /root/Binaries/include/x265*
+	rm /root/Binaries/lib/libx265*
+	rm /root/Binaries/lib/pkgconfig/x265*
+	cd "$WORK_DIR/"
+    Clone https://bitbucket.org/multicoreware/x265_git.git
+	cd "$WORK_DIR/x265_git"*
+	cd "build/linux/"
+	PATH="$DEST_DIR/bin:$PATH"
+	PKG_CONFIG="/usr/bin/pkgconf"
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib64/pkgconfig"
+    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DCMAKE_INSTALL_PREFIX:PATH="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_SHARED:bool=off -DBUILD_SHARED_LIBS=OFF -DENABLE_NASM=on ../../source
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+	sed "s/-lx265/-lx265 -lstdc++/g" "$DEST_DIR/lib/pkgconfig/x265.pc" > "$DEST_DIR/lib/pkgconfig/x265.pc.tmp"
+	mv "$DEST_DIR/lib/pkgconfig/x265.pc.tmp" "$DEST_DIR/lib/pkgconfig/x265.pc"
+}
+
+compileLibX265_v3() {
+	echo "####  X265  ################################################"
+	cd "$WORK_DIR/"
+    Clone https://bitbucket.org/multicoreware/x265_git.git
+	cd "$WORK_DIR/x265_git"*
+	cd "build/linux/"
+    cmake -G "Unix Makefiles" --prefix="$DEST_DIR" --bindir="$DEST_DIR/bin" --enable-static -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DCMAKE_INSTALL_PREFIX:PATH="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_SHARED:bool=off -DBUILD_SHARED_LIBS=OFF ../../source
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+	sed "s/-lx265/-lx265 -lstdc++/g" "$DEST_DIR/lib/pkgconfig/x265.pc" > "$DEST_DIR/lib/pkgconfig/x265.pc.tmp"
+	mv "$DEST_DIR/lib/pkgconfig/x265.pc.tmp" "$DEST_DIR/lib/pkgconfig/x265.pc"
+}
+
+compileLibX265_v2() {
+	echo "####  X265  ################################################"
+	cd "$WORK_DIR/"
+    Clone https://bitbucket.org/multicoreware/x265_git.git
+	cd "$WORK_DIR/x265_git"*
+	cd "build/linux/"
+    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_SHARED:bool=off -DBUILD_SHARED_LIBS=OFF ../../source
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+
+    # forward declaration should not be used without struct keyword!
+    sed -i.orig -e 's,^ *x265_param\* zoneParam,struct x265_param* zoneParam,' "$DEST_DIR/include/x265.h"
+}
+
+compileLibX265_v1() {
+	echo "####  X265  ################################################"
+    if cd "$WORK_DIR/x265/"; then
+        hg pull
+        hg update
+    else
+        cd "$WORK_DIR/"
+        hg clone https://bitbucket.org/multicoreware/x265
+    fi
+
+    cd "$WORK_DIR/x265/build/linux/"
+    cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_SHARED:bool=off -DBUILD_SHARED_LIBS=OFF ../../source
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+
+    # forward declaration should not be used without struct keyword!
+    sed -i.orig -e 's,^ *x265_param\* zoneParam,struct x265_param* zoneParam,' "$DEST_DIR/include/x265.h"
+}
+
+compileLibXvid() {
+	echo "####  Xvid  ################################################"
+	echo "####  --enable-libxvid ####"
+    echo "Compiling libxvid"
+    cd "$WORK_DIR/"
+    Wget https://downloads.xvid.com/downloads/xvidcore-$XVID_VERSION.tar.gz
+    tar xzvf "xvidcore-$XVID_VERSION.tar.gz"
+    cd "xvidcore"*
+    cd "build/generic"
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+	Make install
+	if [[ -f "$DEST_DIR"/lib/libxvidcore.4.dylib ]]; then
+		execute rm "$DEST_DIR/lib/libxvidcore.4.dylib"
+	fi
+
+	if [[ -f "$DEST_DIR"/lib/libxvidcore.so ]]; then
+		execute rm "$DEST_DIR"/lib/libxvidcore.so*
+	fi
+}
+
+compileLibAom() {
+	echo "####  AOM  ################################################"
+	echo "####  --enable-libaom ####"
+    echo "Compiling libaom"
+	cd "$WORK_DIR/"
+    Clone https://aomedia.googlesource.com/aom
+	cd aom*
+	rm -rf CMakeCache.txt CMakeFiles
+	cd "$WORK_DIR/"
+	mkdir -p "$WORK_DIR/aom_build"
+	cd "$WORK_DIR/aom_build/"
+	PATH="$DEST_DIR/bin:$PATH" \
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:$PKG_CONFIG_PATH" \
+	cmake -DENABLE_TESTS=0 -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DCMAKE_INSTALL_LIBDIR=lib ../aom
+    make -j$(nproc) VERBOSE=1
+	Make install
+}
+
+
+compileLibAom2() {
+	echo "####  AOM  ################################################"
+    echo "Compiling libaom"
+	cd "$WORK_DIR/"
+    Clone https://aomedia.googlesource.com/aom
+	cd aom*
+	rm -rf CMakeCache.txt CMakeFiles
+	cd "$WORK_DIR/"
+	mkdir -p "$WORK_DIR/aom_build"
+	cd "$WORK_DIR/aom_build/"
+    which cmake3 && PROG=cmake3 || PROG=cmake
+    $PROG -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DENABLE_SHARED=off -DENABLE_NASM=on ../aom
+    Make install
+}
+
+compileOpenCore() {
+	echo "####  Opencore  ################################################"
+	echo "####  --enable-libopencore_amrnb" "--enable-libopencore_amrwb ####"
+    echo "Compiling libopencore"
+    cd "$WORK_DIR/"
+    Wget https://deac-riga.dl.sourceforge.net/project/opencore-amr/opencore-amr/opencore-amr-$OPENCORE_VERSION.tar.gz
+    tar xzvf "opencore-amr-$OPENCORE_VERSION.tar.gz"
+    cd "opencore-amr-$OPENCORE_VERSION"*
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+}
+
+compileLibfdkcc() {
+	echo "####  FDK AAC  ################################################"
+    echo "Compiling libfdk-cc"
+    cd "$WORK_DIR/"
+    Wget -O fdk-cc.zip https://github.com/mstorsjo/fdk-aac/zipball/master
+    unzip -o fdk-cc.zip
+    cd mstorsjo-fdk-aac*
+    autoreconf -fiv
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    Make install distclean
+}
+
+compileLibfdkaac() {
+	echo "####  FDK AAC  ################################################"
+	echo "####  --enable-libfdk-aac ####"
+    echo "Compiling libfdk-aac"
+    cd "$WORK_DIR/"
+	Wget -O fdk-aac.tar.gz https://sourceforge.net/projects/opencore-amr/files/fdk-aac/fdk-aac-$FDKAAC_VERSION.tar.gz/download
+    tar xzvf "fdk-aac.tar.gz"
+    cd "fdk-aac-$FDKAAC_VERSION"*
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+	Make install distclean
+}
+
+compileLibMP3Lame() {
+	echo "####  MP3 LAME  ################################################"
+	echo "####  --enable-libmp3lame ####"
+    echo "Compiling libmp3lame"
+    cd "$WORK_DIR/"
+    Wget "http://downloads.sourceforge.net/project/lame/lame/$LAME_VERSION/lame-$LAME_VERSION.tar.gz"
+    tar xzvf "lame-$LAME_VERSION.tar.gz"
+    cd "lame-$LAME_VERSION"
+    ./configure --prefix="$DEST_DIR" --enable-nasm --disable-shared --enable-static
+	make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibOpus() {
+	echo "####  LIB OPUS  ################################################"
+	echo "####  --enable-libopus ####"
+    echo "Compiling libopus"
+    cd "$WORK_DIR/"
+    Wget "http://downloads.xiph.org/releases/opus/opus-$OPUS_VERSION.tar.gz"
+    tar xzvf "opus-$OPUS_VERSION.tar.gz"
+    cd "opus-$OPUS_VERSION"
+    #./autogen.sh
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibVpx() {
+	echo "####  LIB VPX  ################################################"
+    echo "Compiling libvpx"
+    Clone https://chromium.googlesource.com/webm/libvpx
+    ./configure --prefix="$DEST_DIR" --disable-examples --enable-runtime-cpu-detect --enable-vp9 --enable-vp8 \
+    --enable-postproc --enable-vp9-postproc --enable-multi-res-encoding --enable-webm-io --enable-better-hw-compatibility \
+    --enable-vp9-highbitdepth --enable-onthefly-bitpacking --enable-realtime-only --enable-postproc-visualizer\
+    --cpu=native --as=nasm --disable-docs --enable-static --disable-shared --disable-examples --disable-unit-tests --enable-webm-io --enable-libyuv
+    Make install clean
+}
+
+compileLibOgg() {
+	echo "####  LIB OGG  ################################################"
+    echo "Compiling libOgg"
+    cd "$WORK_DIR/"
+    Wget "https://ftp.osuosl.org/pub/xiph/releases/ogg/libogg-$OGG_VERSION.tar.gz"
+    tar -xzvf "libogg-$OGG_VERSION.tar.gz"
+    cd "libogg-$OGG_VERSION"
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibvorbis() {
+	echo "####  LIB VORBIS  ################################################"
+	echo "####  --enable-libvorbis ####"
+    echo "Compiling libvorbis"
+    cd "$WORK_DIR/"
+    Wget -O vorbis.zip https://gitlab.xiph.org/xiph/vorbis/-/archive/master/vorbis-master.zip
+    unzip -o vorbis.zip
+    cd vorbis-master*
+    autoreconf -fiv
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static --with-ogg-libraries="$DEST_DIR/lib" --with-ogg-includes="$DEST_DIR/include/" --disable-oggtest
+    make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibvorbis2() {
+	echo "####  LIB VORBIS  ################################################"
+    echo "Compiling libvorbis"
+    cd "$WORK_DIR/"
+    Wget -O vorbis.zip https://gitlab.xiph.org/xiph/vorbis/-/archive/master/vorbis-master.zip
+    unzip -o vorbis.zip
+    cd vorbis-master*
+    autoreconf -fiv
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    Make install distclean
+}
+
+compileLibsdl() {
+	echo "####  LIB SDL  ################################################"
+    echo "Compiling libsdl"
+    cd "$WORK_DIR/"
+    Wget -O libdsl.zip https://www.libsdl.org/release/SDL2-2.0.12.tar.gz
+    unzip -o libsdl.zip
+    cd SDL-*
+    ./configure --prefix="$DEST_DIR" --disable-shared --enable-static
+    make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibsdl2() {
+	echo "####  LIB SDL  ################################################"
+    echo "Compiling libsdl"
+    cd "$WORK_DIR/"
+    Wget -O libdsl.zip http://hg.libsdl.org/SDL/archive/tip.zip
+    unzip -o libsdl.zip
+    cd SDL-*
+    autoreconf -fiv
+    ./configure --prefix="$DEST_DIR" --with-x --with-pic=yes --disable-alsatest --enable-pthreads --enable-static=yes --enable-shared=no --disable-shared --enable-static 
+    make -j$(nproc) VERBOSE=1
+    Make install distclean
+}
+
+compileLibAss() {
+	echo "####  LIB ASS  ################################################"
+    echo "Compiling libass"
+    cd "$WORK_DIR/"
+    Wget https://github.com/libass/libass/releases/download/$LASS_VERSION/libass-$LASS_VERSION.tar.xz
+    tar Jxvf "libass-$LASS_VERSION.tar.xz"
+    cd "libass-$LASS_VERSION"*
+    autoreconf -fiv
+    sudo ./configure --prefix="$DEST_DIR" --disable-shared --enable-static CFLAGS="-I$DEST_DIR/include"
+    make -j$(nproc)
+    Make install distclean
+}
+
+compileLibSrt() {
+	echo "####  LIB SRT  ################################################"
+    echo "Compiling libSrt"
+    cd "$WORK_DIR/"
+    Wget -O srt.tar.gz "https://github.com/Haivision/srt/archive/v$SRT_VERSION.tar.gz"
+    tar -xzvf "srt.tar.gz"
+    cd "srt-$SRT_VERSION"
+	export OPENSSL_ROOT_DIR="${DEST_DIR}"
+	export OPENSSL_LIB_DIR="${DEST_DIR}"/lib
+	export OPENSSL_INCLUDE_DIR="${DEST_DIR}"/include/
+	PATH="$DEST_DIR/bin:$PATH" \
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:$PKG_CONFIG_PATH" \
+	which cmake3 && PROG=cmake3 || PROG=cmake
+    $PROG -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$DEST_DIR" -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_BINDIR=bin -DCMAKE_INSTALL_INCLUDEDIR=include -DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DENABLE_APPS=OFF -DUSE_STATIC_LIBSTDCXX=ON
+    Make install distclean
+}
+
+compileFFmpegPre(){
+	echo "####  FFMPEG3  ################################################"
+    echo "Compiling ffmpeg"
+	cd "$WORK_DIR/"
+    rm -rf "FFmpeg/"
+    Clone https://github.com/FFmpeg/FFmpeg -b master
+	cd "$WORK_DIR/"
+	mv "FFmpeg/" "FFmpeg2/"
+}
+
+compileFfmpeg(){
+	echo "####  FFMPEG  ################################################"
+    echo "Compiling ffmpeg"
+    Clone https://github.com/FFmpeg/FFmpeg -b master
+
+    export PATH="$CUDA_DIR/bin:$PATH"  # ..path to nvcc
+    PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig" \
+    ./configure \
+      --pkg-config-flags="--static" \
+      --prefix="$DEST_DIR" \
+      --bindir="$DEST_DIR/bin" \
+      --extra-cflags="-I $DEST_DIR/include -I $CUDA_DIR/include/" \
+      --extra-ldflags="-L $DEST_DIR/lib -L $CUDA_DIR/lib64/" \
+      --extra-libs="-lpthread" \
+      --enable-cuda \
+      --enable-cuda-sdk \
+      --enable-cuvid \
+      --enable-libnpp \
+      --enable-gpl \
+      --enable-libass \
+      --enable-libfdk-aac \
+      --enable-vaapi \
+      --enable-libfreetype \
+      --enable-libmp3lame \
+      --enable-libopus \
+      --enable-libtheora \
+      --enable-libvorbis \
+      --enable-libvpx \
+      --enable-libx264 \
+      --enable-libx265 \
+      --enable-nonfree \
+      --enable-libaom \
+      --enable-nvenc
+    Make install distclean
+    hash -r
+}
+
+compileFFmpegX(){
+	echo "####  FFMPEG3  ################################################"
+    echo "Compiling ffmpeg"
+	cd "$WORK_DIR/"
+    rm -rf "FFmpeg/"
+    Clone https://github.com/FFmpeg/FFmpeg -b master
+    export PATH="$HOME/bin:$PATH"
+	export PKG_CONFIG="/usr/bin/pkgconf"
+	export PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib64/pkgconfig"
+    ./configure \
+--prefix=/root/FFmpeg/target
+ --extra-cflags=-I/root/FFmpeg/target/include
+ --extra-ldflags='-L/root/FFmpeg/target/lib -Wl,-Bstatic -lcrypto -lssl -Wl,-Bdynamic'
+ --extra-version=XUI10FFMPEG 
+ --disable-debug
+ --disable-shared
+ --enable-libx265
+ --enable-static
+ --extra-cflags=--static
+ --disable-ffplay
+ --disable-doc
+ --enable-gpl
+ --enable-pthreads
+ --enable-postproc
+ --enable-libass
+ --enable-gray
+ --enable-runtime-cpudetect
+ --enable-libfreetype
+ --enable-libmp3lame
+ --enable-libopus
+ --enable-libtheora
+ --enable-libvorbis
+ --enable-gnutls
+ --enable-libx264
+ --enable-libxvid
+ --enable-bzlib
+ --enable-fontconfig
+ --enable-zlib
+ --enable-version3
+ --enable-libvpx
+ --enable-libxavs
+ --enable-nvenc
+ --enable-ffnvcodec
+ --enable-cuvid
+ --disable-autodetect
+ --disable-alsa
+ --disable-indev=alsa
+ --disable-outdev=alsa
+ --enable-librtmp
+ --extra-libs='-lsupc++ -lgmp -lz -lunistring -lpthread -lm -lrt -ldl'
+ 
+--prefix=/usr
+ --enable-gpl
+ --enable-nonfree
+ --enable-version3
+ --enable-muxer=rtsp
+ --enable-protocol=rtp
+ --enable-demuxer=rtsp
+ --enable-bzlib
+ --enable-frei0r
+ --enable-ladspa
+ --enable-openal
+ --enable-libass
+ --enable-libdc1394
+ --enable-libfreetype
+ --enable-libfontconfig
+ --enable-libfribidi
+ --enable-libgsm
+ --enable-libmp3lame
+ --enable-libpulse
+ --enable-libsoxr
+ --enable-libspeex
+ --enable-libtheora
+ --enable-libvorbis
+ --enable-libvpx
+ --enable-libx264
+ --enable-libx265
+ --enable-libxvid
+ --enable-libfdk_aac
+ --enable-libxml2
+ --enable-libcv2
+ --enable-static
+ --enable-runtime-cpudetect
+ --enable-openssl
+ --disable-vdpau
+ --disable-doc
+ --disable-shared
+ --extra-cflags=-fopenmp
+ --extra-ldflags=-fopenmp
+ --disable-libmfx
+ --enable-cuda
+ --enable-cuvid
+ --enable-nvdec
+ --enable-nvenc
+ --enable-libnpp
+ --enable-cuda-sdk
+ --extra-cflags=-I/usr/local/cuda/include
+ --extra-ldflags=-L/usr/local/cuda/lib64
+ --extra-cflags=-DCONFIG_LCNS_AUTH
+ --extra-ldflags=-L/root/xaccel-codec/lcns
+ --extra-libs='-llcns -lssl -lcrypto -lz -ljansson'
+}
+
+compileFFmpeg2(){
+	echo "####  FFMPEG2  ################################################"
+    echo "Compiling ffmpeg"
+	cd "$WORK_DIR/"
+    rm -rf "FFmpeg/"
+    Clone https://github.com/FFmpeg/FFmpeg -b master
+    export PATH="$HOME/bin:$PATH"
+	export PKG_CONFIG="/usr/bin/pkgconf"
+	export PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:/usr/local/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:/usr/local/share/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:/usr/lib64/pkgconfig"
+    ./configure \
+		--pkg-config-flags="--static" \
+		--enable-static --disable-shared \
+		--prefix="$DEST_DIR" \
+		--bindir="$DEST_DIR/bin" \
+		--extra-cflags="-I $DEST_DIR/include -I /usr/include" \
+		--extra-ldflags="-L $DEST_DIR/lib -L /usr/lib" \
+		--extra-ldexeflags=-static \
+		--enable-runtime-cpudetect \
+		--extra-libs=-lpthread \
+		--extra-libs="-lpthread -lm -lz -ldl" \
+		--enable-ladspa \
+		--enable-libaom \
+		--enable-libass \
+		--enable-libcaca \
+		--enable-libcdio \
+		--enable-libcodec2 \
+		--enable-libdrm \
+		--enable-libfontconfig \
+		--enable-libfreetype \
+		--enable-libfribidi \
+		--enable-libfdk-aac \
+		--enable-libgme \
+		--enable-libgsm \
+		--enable-libjack \
+		--enable-libmodplug \
+		--enable-libmp3lame \
+		--enable-libnpp \
+		--enable-libopencore-amrnb \
+		--enable-libopencore-amrwb \
+		--enable-libopencore-amrwb \
+		--enable-libopenjpeg \
+		--enable-libopenmpt \
+		--enable-libopus \
+		--enable-libpulse \
+		--enable-librubberband \
+		--enable-libshine \
+		--enable-libsnappy \
+		--enable-libsoxr \
+		--enable-libspeex \
+		--enable-libssh \
+		--enable-libsrt \
+		--enable-libtheora \
+		--enable-libtwolame \
+		--enable-libvo-amrwbenc \
+		--enable-libvorbis \
+		--enable-libvpx \
+		--enable-libwebp \
+		--enable-libxvid \
+		--enable-libzvbi \
+		--enable-libx264 \
+		--enable-libx265 \
+		--enable-libxcb \
+		--enable-lv2 \
+		--enable-gpl \
+		--enable-openal \
+		--enable-opengl \
+		--enable-openssl \
+		--enable-nonfree \
+		--enable-version3 \
+		--enable-muxer=rtsp \
+		--enable-protocol=rtp \
+		--enable-demuxer=rtsp \
+		--enable-bzlib \
+		--enable-frei0r \
+		--enable-libmp3lame \
+		--enable-libtheora \
+		--enable-opencl \
+		--enable-pic \
+		--enable-nonfree \
+		--enable-small  \
+		--enable-chromaprint \
+		--enable-frei0r \
+		--enable-gmp \
+		--disable-debug \
+		--enable-static
+	PATH="$HOME/bin:$PATH"
+	make -j$(nproc) 
+	make -j$(nproc) install 
+	make -j$(nproc) distclean
+    hash -r
+}
+
+compileFFmpeg3(){
+	echo "####  FFMPEG3  ################################################"
+    echo "Compiling ffmpeg"
+	cd "$WORK_DIR/"
+    rm -rf "FFmpeg/"
+    Clone https://github.com/FFmpeg/FFmpeg -b master
+    export PATH="$HOME/bin:$PATH" 
+	export PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig"
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig" \
+    ./configure \
+		--cc=gcc \
+		--pkg-config-flags="--static" \
+		--pkgconfigdir="$DEST_DIR/lib/pkgconfig" \
+		--enable-static --disable-shared \
+	    --prefix="$DEST_DIR" \
+        --bindir="$HOME/bin" \
+		--extra-cflags="-I $DEST_DIR/include" \
+		--extra-ldflags="-L $DEST_DIR/lib" \
+        --extra-cflags="-I /usr/include" \
+        --extra-ldflags="-L /usr/lib" \
+	    --extra-cflags="-I/usr/local/include" \
+        --extra-ldflags="-L/usr/local/lib" \
+        --extra-ldexeflags=-static \
+		--enable-runtime-cpudetect \
+		--extra-libs=-lpthread \
+		--extra-libs="-lpthread -lm -lz -ldl -lstdc++ -lgcc_s -lgcc -lgcc_s -lgcc -lrt -lnuma" \
+        --enable-ladspa \
+        --enable-libaom \
+        --enable-libcdio \
+        --enable-libfontconfig \
+        --enable-libfreetype \
+        --enable-libfdk-aac \
+        --enable-libgsm \
+        --enable-libjack \
+        --enable-libmp3lame \
+        --enable-libopencore-amrnb \
+        --enable-libopencore-amrwb \
+        --enable-libopencore-amrwb \
+        --enable-libopus \
+        --enable-libsnappy \
+        --enable-libspeex \
+        --enable-libtheora \
+        --enable-libtwolame \
+        --enable-libvo-amrwbenc \
+        --enable-libvorbis \
+        --enable-libvpx \
+        --enable-libwebp \
+        --enable-libxvid \
+        --enable-libzvbi \
+        --enable-libx264 \
+		--enable-libx265 \
+        --enable-libxcb \
+        --enable-gpl \
+        --enable-openssl \
+        --enable-nonfree \
+        --enable-version3 \
+        --enable-muxer=rtsp \
+        --enable-protocol=rtp \
+        --enable-demuxer=rtsp \
+        --enable-bzlib \
+        --enable-frei0r \
+        --enable-pic \
+        --enable-nonfree \
+        --enable-small  \
+        --enable-frei0r \
+        --enable-gmp \
+        --disable-debug \
+        --enable-static
+		PATH="$HOME/bin:$PATH" make -j$(nproc) 
+		make -j$(nproc) install 
+		make -j$(nproc) distclean 
+		hash -r
+}
+
+compileFFmpeg4(){
+	echo "####  FFMPEG3  ################################################"
+    echo "Compiling ffmpeg"
+	cd "$WORK_DIR/"
+    rm -rf "FFmpeg/"
+    cp -r "FFmpeg2/" "FFmpeg/"
+	cd "$WORK_DIR/FFmpeg"
+	export PATH="$HOME/bin:/usr/lib/x86_64-linux-gnu:$PATH"
+    export PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH"
+    PATH="$HOME/bin:/usr/lib/x86_64-linux-gnu:$PATH" \
+	PKG_CONFIG_PATH="$DEST_DIR/lib/pkgconfig:$DEST_DIR/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH" \
+    ./configure \
+		--cc=gcc \
+		--pkg-config-flags="--static" \
+		--pkgconfigdir="$PKG_CONFIG_PATH" \
+		--pkgconfigdir="$DEST_DIR/lib/pkgconfig" \
+		--pkgconfigdir="/usr/lib/x86_64-linux-gnu/pkgconfig" \
+		--enable-static \
+		--disable-shared \
+	    --prefix="$DEST_DIR" \
+        --bindir="$BIN_DIR" \
+		--extra-cflags="-I$DEST_DIR/include" \
+		--extra-ldflags="-L$DEST_DIR/lib" \
+        --extra-cflags="-I/usr/include" \
+        --extra-ldflags="-L/usr/lib" \
+	    --extra-cflags="-I/usr/local/include" \
+        --extra-ldflags="-L/usr/local/lib" \
+        --extra-ldexeflags=-static \
+		--enable-runtime-cpudetect \
+		--extra-libs=-lpthread \
+		--extra-libs="-lpthread -lm -lz -ldl -lass" \
+		--enable-ladspa \
+		--enable-libaom \
+		--enable-libass \
+		--enable-libcaca \
+		--enable-libcdio \
+		--enable-libcodec2 \
+		--enable-libdrm \
+		--enable-libfontconfig \
+		--enable-libfreetype \
+		--enable-libfribidi \
+		--enable-libfdk-aac \
+		--enable-libgme \
+		--enable-libgsm \
+		--enable-libjack \
+		--enable-libmodplug \
+		--enable-libmp3lame \
+		--enable-libopencore-amrnb \
+		--enable-libopencore-amrwb \
+		--enable-libopencore-amrwb \
+		--enable-libopenjpeg \
+		--enable-libopenmpt \
+		--enable-libopus \
+		--enable-libpulse \
+		--enable-librubberband \
+		--enable-libshine \
+		--enable-libsnappy \
+		--enable-libsoxr \
+		--enable-libspeex \
+		--enable-libssh \
+		--enable-libsrt \
+		--enable-libtheora \
+		--enable-libtwolame \
+		--enable-libvo-amrwbenc \
+		--enable-libvorbis \
+		--enable-libvpx \
+		--enable-libwebp \
+		--enable-libxvid \
+		--enable-libzvbi \
+		--enable-libx264 \
+		--enable-libx265 \
+		--enable-libxcb \
+		--enable-lv2 \
+		--enable-gpl \
+		--enable-openal \
+		--enable-opengl \
+		--enable-openssl \
+		--enable-nonfree \
+		--enable-version3 \
+		--enable-muxer=rtsp \
+		--enable-protocol=rtp \
+		--enable-demuxer=rtsp \
+		--enable-bzlib \
+		--enable-frei0r \
+		--enable-libmp3lame \
+		--enable-libtheora \
+		--enable-opencl \
+		--enable-pic \
+		--enable-nonfree \
+		--enable-small  \
+		--enable-frei0r \
+		--enable-gmp \
+		--disable-debug \
+		--enable-static
+		PATH="$HOME/bin:/usr/lib/x86_64-linux-gnu:$PATH" \
+		make -j$(nproc) 
+		make -j$(nproc) install 
+		make -j$(nproc) distclean 
+		hash -r
+}
+
+
+
+#installLibs
+#installCUDASDK
+#installNvidiaSDK
+
+#compileCMake
+#compileNasm
+#compileYasm
+#compileZlib
+#compileOpenSSL
+#compilePkgConfig
+#compileLV2
+#compileLibX264
+#compileLibX265
+#compileLibXvid
+#compileLibAom
+#compileOpenCore
+#compileLibVpx
+#compileLibOgg
+#compileLibvorbis
+#compileLibfdkcc
+#compileLibfdkaac
+#compileLibMP3Lame
+#compileLibOpus
+#compileLibAss
+#compileFFmpegPre
+#compileFFmpeg4
+
+echo "Complete!"
+
+## END ##
