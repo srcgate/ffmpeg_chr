@@ -818,5 +818,5 @@ compileFFmpeg5
 echo "Complete!"
 
 echo "apt-get install -y libjack-dev libopenal-dev libvdpau-dev libxcb1-dev libxcb-shm0-dev libxcb-xfixes0-dev libcdio-paranoia-dev libcaca-dev libxv1 liblilv-dev librubberband-dev libass-dev libva-dev libgme-dev libmodplug-dev libopenmpt-dev  libchromaprint-dev libssh-dev libopencore-amrnb-dev libopencore-amrwb-dev libcodec2-dev libvo-amrwbenc-dev"
-
+echo "sudo apt install ocl-icd-opencl-dev"
 ## END ##
