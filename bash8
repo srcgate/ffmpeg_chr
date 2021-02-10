@@ -219,7 +219,7 @@ compileLibVpx() {
     echo "Compiling libvpx"
     cd "$WORK_DIR/"
     Clone https://github.com/webmproject/libvpx.git
-	./configure --prefix="$CMP_PREFIX" --enable-runtime-cpu-detect --cpu=native --as=nasm --enable-vp8 --enable-vp9 --enable-postproc-visualizer --disable-examples --disable-unit-tests --enable-static --disable-shared --enable-multi-res-encoding --enable-postproc --enable-vp9-postproc --enable-vp9-highbitdepth --enable-pic --enable-webm-io --enable-libyuv
+	./configure --prefix="$CMP_PREFIX" --enable-runtime-cpu-detect --cpu=native --as=yasm --enable-vp8 --enable-vp9 --enable-postproc-visualizer --disable-examples --disable-unit-tests --enable-static --disable-shared --enable-multi-res-encoding --enable-postproc --enable-vp9-postproc --enable-vp9-highbitdepth --enable-pic --enable-webm-io --enable-libyuv
 	make -j$(nproc)
 	make -j$(nproc) install
 	make clean -j$(nproc)
